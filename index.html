@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MoodStream — Watch How You Feel</title>
+
+  <!-- React + Babel (CDN — no build step needed) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+
+  <!--
+  ╔══════════════════════════════════════════════════════════╗
+  ║  Source is split into separate files for development:    ║
+  ║  css/styles.css  — all styles & animations               ║
+  ║  js/data.js      — content database & emotion config     ║
+  ║  js/engine.js    — Groq LLM + keyword fallback           ║
+  ║  js/components.js— reusable React components             ║
+  ║  js/app.js       — main App + screen state machine       ║
+  ║                                                          ║
+  ║  To use the split files, serve with a local server:      ║
+  ║    python3 -m http.server 8080                           ║
+  ║    then open http://localhost:8080                       ║
+  ╚══════════════════════════════════════════════════════════╝
+  -->
+
+  <style>
+/* ── css/styles.css ─────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0a0a0f; --surface: #12121a; --surface2: #1a1a26;
+  --border: rgba(255,255,255,0.08); --text: #f0f0f8;
+  --text-muted: #8888aa; --accent: #6c63ff; --accent2: #a855f7;
+}
+html, body { height: 100%; background: var(--bg); font-family: 'Inter', sans-serif; color: var(--text); }
+html { scroll-behavior: smooth; }
+#root { min-height: 100vh; }
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+@keyframes fadeIn  { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+@keyframes pulse   { 0%,100% { transform:scale(1); opacity:1; } 50% { transform:scale(1.05); opacity:.8; } }
+@keyframes float   { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-8px); } }
+@keyframes ripple  { 0% { transform:scale(.8); opacity:1; } 100% { transform:scale(2.4); opacity:0; } }
+@keyframes slideIn { from { opacity:0; transform:translateX(30px); } to { opacity:1; transform:translateX(0); } }
+
+.fade-in  { animation: fadeIn  0.5s ease forwards; }
+.slide-in { animation: slideIn 0.4s ease forwards; }
+
+.noise-bg { position:fixed; inset:0; pointer-events:none; z-index:0; opacity:.4;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E"); }
+.orb { position:fixed; border-radius:50%; filter:blur(80px); pointer-events:none; z-index:0; transition:background 1.5s ease; }
+
+.card { background:var(--surface); border:1px solid var(--border); border-radius:16px; transition:border-color .3s; }
+.card:hover { border-color:rgba(255,255,255,.15); }
+.content-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; overflow:hidden; transition:all .3s ease; cursor:pointer; }
+.content-card:hover { transform:translateY(-4px); box-shadow:0 12px 40px rgba(0,0,0,.4); }
+
+.form-input { width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:14px 16px; color:var(--text); font-family:'Inter',sans-serif; font-size:15px; outline:none; transition:border-color .2s,box-shadow .2s; resize:none; }
+.form-input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(108,99,255,.15); }
+.form-input::placeholder { color:var(--text-muted); }
+
+input[type=range] { -webkit-appearance:none; width:100%; height:6px; background:var(--surface2); border-radius:3px; outline:none; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:22px; height:22px; border-radius:50%; background:linear-gradient(135deg,#6c63ff,#a855f7); cursor:pointer; transition:transform .2s; box-shadow:0 0 10px rgba(108,99,255,.6); }
+input[type=range]::-webkit-slider-thumb:hover { transform:scale(1.2); }
+
+.btn-primary { background:linear-gradient(135deg,var(--accent),var(--accent2)); border:none; border-radius:12px; padding:14px 28px; color:#fff; font-size:15px; font-weight:600; cursor:pointer; transition:all .2s ease; font-family:'Inter',sans-serif; }
+.btn-primary:hover:not(:disabled) { transform:translateY(-1px); box-shadow:0 8px 24px rgba(108,99,255,.4); }
+.btn-primary:active:not(:disabled) { transform:translateY(0); }
+.btn-primary:disabled { opacity:.4; cursor:not-allowed; }
+
+.btn-ghost { background:transparent; border:1px solid var(--border); border-radius:12px; padding:12px 24px; color:var(--text-muted); font-size:14px; font-weight:500; cursor:pointer; transition:all .2s ease; font-family:'Inter',sans-serif; }
+.btn-ghost:hover { border-color:rgba(255,255,255,.2); color:var(--text); background:var(--surface2); }
+
+.option-btn { border:1px solid var(--border); border-radius:12px; padding:12px 16px; background:var(--surface2); color:var(--text-muted); cursor:pointer; transition:all .2s ease; font-family:'Inter',sans-serif; font-size:14px; font-weight:500; text-align:left; width:100%; }
+.option-btn:hover { border-color:rgba(255,255,255,.2); color:var(--text); }
+.option-btn.selected { border-color:var(--accent); color:var(--text); background:rgba(108,99,255,.1); }
+
+.word-chip { border:1px solid var(--border); border-radius:999px; padding:6px 14px; background:var(--surface2); color:var(--text-muted); cursor:pointer; transition:all .2s ease; font-size:13px; font-weight:500; white-space:nowrap; font-family:'Inter',sans-serif; }
+.word-chip:hover { border-color:rgba(255,255,255,.2); color:var(--text); }
+.word-chip.selected { border-color:var(--accent); color:var(--text); background:rgba(108,99,255,.12); }
+
+.tab-btn { padding:10px 20px; border-radius:10px; border:none; background:transparent; color:var(--text-muted); font-size:14px; font-weight:500; cursor:pointer; transition:all .2s ease; font-family:'Inter',sans-serif; }
+.tab-btn.active { background:var(--surface2); color:var(--text); box-shadow:0 2px 8px rgba(0,0,0,.3); }
+.tab-btn:hover:not(.active) { color:var(--text); }
+
+.progress-bar  { height:3px; background:var(--surface2); border-radius:2px; overflow:hidden; }
+.progress-fill { height:100%; border-radius:2px; background:linear-gradient(90deg,var(--accent),var(--accent2)); transition:width .4s ease; }
+.conf-bar-track { height:6px; background:var(--surface2); border-radius:3px; overflow:hidden; width:100%; }
+.conf-bar-fill  { height:100%; border-radius:3px; transition:width 1s ease .3s; }
+
+.dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin:0 3px; }
+.dot:nth-child(1) { animation:pulse 1.2s .0s infinite; }
+.dot:nth-child(2) { animation:pulse 1.2s .2s infinite; }
+.dot:nth-child(3) { animation:pulse 1.2s .4s infinite; }
+
+.badge     { display:inline-block; padding:3px 8px; border-radius:6px; font-size:11px; font-weight:600; letter-spacing:.5px; }
+.llm-badge { display:inline-flex; align-items:center; gap:5px; padding:4px 10px; border-radius:999px; font-size:11px; font-weight:700; letter-spacing:.4px; background:rgba(108,99,255,.15); border:1px solid rgba(108,99,255,.3); color:#a78bfa; }
+.success-dot { width:8px; height:8px; border-radius:50%; background:#34d399; display:inline-block; box-shadow:0 0 6px #34d399; }
+.star { color:#fbbf24; font-size:12px; }
+
+.scroll-row { display:flex; gap:16px; overflow-x:auto; padding-bottom:8px; }
+.scroll-row::-webkit-scrollbar { height:4px; }
+.scroll-row::-webkit-scrollbar-thumb { background:#333; border-radius:2px; }
+
+.key-input-wrap { position:relative; }
+.key-input-wrap .toggle-eye { position:absolute; right:12px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:16px; padding:4px; }
+.overlay { position:fixed; inset:0; background:rgba(0,0,0,.7); backdrop-filter:blur(6px); z-index:100; display:flex; align-items:center; justify-content:center; padding:20px; animation:fadeIn .2s ease; }
+.error-banner { background:rgba(239,68,68,.12); border:1px solid rgba(239,68,68,.3); border-radius:10px; padding:12px 16px; color:#fca5a5; font-size:13px; display:flex; align-items:flex-start; gap:10px; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+/* ── js/data.js ─────────────────────────────────────────── */
+
+const EMOTION_CONFIG = {
+  happy:    { emoji:'😊', label:'Happy',       color:'#f59e0b', bg:'rgba(245,158,11,0.12)',  gradient:'linear-gradient(135deg,#f59e0b,#ef4444)', orb1:'rgba(245,158,11,0.15)',  orb2:'rgba(251,191,36,0.1)'  },
+  sad:      { emoji:'😢', label:'Melancholic',  color:'#60a5fa', bg:'rgba(96,165,250,0.12)',  gradient:'linear-gradient(135deg,#3b82f6,#6366f1)', orb1:'rgba(59,130,246,0.15)',  orb2:'rgba(99,102,241,0.1)'  },
+  anxious:  { emoji:'😰', label:'Anxious',     color:'#a78bfa', bg:'rgba(167,139,250,0.12)', gradient:'linear-gradient(135deg,#8b5cf6,#ec4899)', orb1:'rgba(139,92,246,0.15)',  orb2:'rgba(236,72,153,0.1)'  },
+  excited:  { emoji:'🔥', label:'Excited',     color:'#f97316', bg:'rgba(249,115,22,0.12)',  gradient:'linear-gradient(135deg,#f97316,#ef4444)', orb1:'rgba(249,115,22,0.15)',  orb2:'rgba(239,68,68,0.1)'   },
+  calm:     { emoji:'🌊', label:'Calm',         color:'#34d399', bg:'rgba(52,211,153,0.12)',  gradient:'linear-gradient(135deg,#10b981,#06b6d4)', orb1:'rgba(16,185,129,0.15)',  orb2:'rgba(6,182,212,0.1)'   },
+  angry:    { emoji:'😤', label:'Frustrated',  color:'#f87171', bg:'rgba(248,113,113,0.12)', gradient:'linear-gradient(135deg,#ef4444,#b45309)', orb1:'rgba(239,68,68,0.15)',   orb2:'rgba(180,83,9,0.1)'    },
+  romantic: { emoji:'💖', label:'Romantic',    color:'#f472b6', bg:'rgba(244,114,182,0.12)', gradient:'linear-gradient(135deg,#ec4899,#f43f5e)', orb1:'rgba(236,72,153,0.15)',  orb2:'rgba(244,63,94,0.1)'   },
+  bored:    { emoji:'😑', label:'Bored',       color:'#94a3b8', bg:'rgba(148,163,184,0.12)', gradient:'linear-gradient(135deg,#6c63ff,#a855f7)', orb1:'rgba(108,99,255,0.15)',  orb2:'rgba(168,85,247,0.1)'  },
+};
+
+const MOOD_WORDS = ['happy','excited','calm','tired','sad','anxious','bored','romantic','frustrated','hopeful','lost','motivated','melancholy','peaceful','restless','content'];
+
+const INTENTS = [
+  { id:'escape',   label:'🌍 Escape',   desc:'Take me somewhere else'       },
+  { id:'relate',   label:'💬 Relate',   desc:'I want to feel understood'     },
+  { id:'energize', label:'⚡ Energize', desc:'Fire me up & motivate me'      },
+  { id:'relax',    label:'🌙 Relax',    desc:'Help me slow down & breathe'  },
+];
+
+const CONTENT = {
+  happy: {
+    movies: [
+      { title:'The Grand Budapest Hotel', genre:'Comedy',  year:2014, rating:8.1, desc:'A quirky, colorful adventure through the whimsical world of a legendary European hotel.',  tag:'Whimsical', color:'#f59e0b', img:'🏨' },
+      { title:'Paddington 2',             genre:'Family',  year:2017, rating:7.8, desc:'The lovable bear returns in a heartwarming, joyful adventure through London.',              tag:'Feel-Good', color:'#10b981', img:'🐻' },
+      { title:'Sing Street',              genre:'Music',   year:2016, rating:7.9, desc:'An infectious coming-of-age story about a boy who forms a band to impress a girl.',         tag:'Uplifting', color:'#6c63ff', img:'🎸' },
+      { title:'La La Land',               genre:'Musical', year:2016, rating:8.0, desc:'A modern love story wrapped in jazz, dreams, and dazzling musical numbers.',                tag:'Dreamy',    color:'#ec4899', img:'🎷' },
+      { title:'About Time',               genre:'Romance', year:2013, rating:7.8, desc:'A heartfelt film about finding joy in everyday moments using the gift of time travel.',      tag:'Touching',  color:'#f97316', img:'⏰' },
+    ],
+    music: [
+      { title:'Happy',        artist:'Pharrell Williams',  genre:'Pop',       desc:'The ultimate feel-good anthem — impossible to listen to without smiling.',         tag:'Anthem',     color:'#f59e0b', img:'🎵' },
+      { title:'Uptown Funk',  artist:'Bruno Mars & Ronson',genre:'Funk',      desc:'Infectious grooves and an irresistible beat that gets everyone moving.',           tag:'Dance',      color:'#ef4444', img:'🎶' },
+      { title:'Good as Hell', artist:'Lizzo',              genre:'Pop/R&B',   desc:'An empowering, joyful track that makes you feel unstoppable.',                     tag:'Empowering', color:'#8b5cf6', img:'🎤' },
+      { title:'Shake It Off', artist:'Taylor Swift',       genre:'Pop',       desc:'Breezy, carefree pop perfection for when you just need to let loose.',             tag:'Carefree',   color:'#f59e0b', img:'🎼' },
+      { title:'Levitating',   artist:'Dua Lipa',           genre:'Disco Pop', desc:'Cosmic disco-pop guaranteed to lift your spirits and your feet.',                  tag:'Groovy',     color:'#06b6d4', img:'🎧' },
+    ],
+    youtube: [
+      { title:'Best Stand-Up Comedy Moments',    channel:'Comedy Central', desc:'The funniest stand-up clips curated to keep you laughing.',               tag:'Comedy',    color:'#f59e0b', img:'😂' },
+      { title:'Wholesome Animal Compilations',   channel:'The Dodo',       desc:'Heartwarming rescues, cute animals, and feel-good stories worldwide.',    tag:'Wholesome', color:'#10b981', img:'🐾' },
+      { title:'Street Food Around the World',    channel:'Mark Wiens',     desc:"Vibrant food adventures through the world's most exciting street scenes.",tag:'Food',      color:'#f97316', img:'🍜' },
+      { title:'Best Travel Bloopers of All Time',channel:'Kara and Nate',  desc:"Hilarious travel mishaps that remind you it's the journey that matters.", tag:'Travel',    color:'#ec4899', img:'✈️' },
+    ],
+  },
+  sad: {
+    movies: [
+      { title:'Good Will Hunting',        genre:'Drama',        year:1997, rating:8.3, desc:'A touching story about a genius janitor confronting his past with a therapist.',   tag:'Profound',  color:'#60a5fa', img:'🧠' },
+      { title:'The Pursuit of Happyness', genre:'Drama',        year:2006, rating:8.0, desc:"An inspiring true story of a man's determination to rise from homelessness.",      tag:'Inspiring', color:'#34d399', img:'💼' },
+      { title:'Eternal Sunshine',         genre:'Sci-Fi',       year:2004, rating:8.3, desc:'A poetic meditation on love, memory, and the beauty of impermanence.',             tag:'Poetic',    color:'#818cf8', img:'🧩' },
+      { title:'The Shawshank Redemption', genre:'Drama',        year:1994, rating:9.3, desc:'An enduring story of hope, friendship, and the indomitable human spirit.',         tag:'Timeless',  color:'#f59e0b', img:'🔑' },
+      { title:'Little Miss Sunshine',     genre:'Comedy-Drama', year:2006, rating:7.8, desc:'A chaotic family road trip that becomes a beautiful ode to imperfection.',          tag:'Heartfelt', color:'#fb923c', img:'☀️' },
+    ],
+    music: [
+      { title:'Skinny Love',              artist:'Bon Iver',             genre:'Indie Folk', desc:'Raw, trembling vocals over sparse guitar — cathartic and deeply moving.', tag:'Cathartic', color:'#60a5fa', img:'🎵' },
+      { title:'Motion Sickness',          artist:'Phoebe Bridgers',      genre:'Indie',      desc:'Achingly honest songwriting that makes you feel seen in your sadness.',    tag:'Relatable', color:'#a78bfa', img:'🎶' },
+      { title:'Casimir Pulaski Day',      artist:'Sufjan Stevens',       genre:'Folk',       desc:'A devastatingly beautiful meditation on loss and questions left behind.',   tag:'Profound',  color:'#93c5fd', img:'🎤' },
+      { title:'Video Games',              artist:'Lana Del Rey',         genre:'Dream Pop',  desc:'Nostalgic, cinematic, and dripping in bittersweet longing.',               tag:'Nostalgic', color:'#c4b5fd', img:'🎼' },
+      { title:'The Night Will Always Win',artist:'Manchester Orchestra', genre:'Indie Rock', desc:'A powerful, slow-building anthem for those dark, quiet moments.',          tag:'Powerful',  color:'#64748b', img:'🎸' },
+    ],
+    youtube: [
+      { title:'Beautiful Short Films',        channel:'Short of the Week', desc:'Emotionally resonant short films exploring the full range of human feeling.', tag:'Cinema',  color:'#60a5fa', img:'🎬' },
+      { title:'Letters to Lost People',       channel:'StoryCorps',        desc:'Real people sharing intimate stories of love, loss, and connection.',        tag:'Stories', color:'#818cf8', img:'📝' },
+      { title:'Comfort Food: Easy Recipes',   channel:'Joshua Weissman',   desc:'Warm, nostalgic recipes that feel like a hug in food form.',                 tag:'Comfort', color:'#f97316', img:'🍲' },
+      { title:'Beautiful Piano Performances', channel:'WQXR',              desc:'Live piano performances of pieces that speak where words cannot.',           tag:'Music',   color:'#a78bfa', img:'🎹' },
+    ],
+  },
+  anxious: {
+    movies: [
+      { title:'Spirited Away',                   genre:'Animation', year:2001, rating:8.6, desc:'A magical coming-of-age journey that soothes the mind with wonder and beauty.',        tag:'Enchanting',  color:'#a78bfa', img:'✨' },
+      { title:'Chef',                            genre:'Drama',     year:2014, rating:7.3, desc:'A calming, delicious film about rediscovering passion and simplicity in life.',         tag:'Comforting',  color:'#f97316', img:'👨‍🍳' },
+      { title:'The Secret Life of Walter Mitty', genre:'Adventure', year:2013, rating:7.3, desc:'A breathtaking journey that celebrates leaving your comfort zone.',                    tag:'Adventurous', color:'#06b6d4', img:'🌄' },
+      { title:'Amélie',                          genre:'Romance',   year:2001, rating:8.3, desc:'A whimsical, quietly joyful film restoring faith in the magic of small things.',       tag:'Whimsical',   color:'#10b981', img:'🌸' },
+      { title:'Her',                             genre:'Sci-Fi',    year:2013, rating:8.0, desc:'A tender story about connection, loneliness, and what it means to feel.',              tag:'Thoughtful',  color:'#f43f5e', img:'💬' },
+    ],
+    music: [
+      { title:'Music for Airports', artist:'Brian Eno',      genre:'Ambient',               desc:'The gold standard of ambient music — designed to calm and float the mind.', tag:'Ambient',   color:'#7dd3fc', img:'🎵' },
+      { title:'Felt',               artist:'Nils Frahm',     genre:'Neo-Classical',         desc:'Intimate piano with felt-muffled keys — pure tranquility.',                 tag:'Tranquil',  color:'#a5f3fc', img:'🎼' },
+      { title:'Island Songs',       artist:'Ólafur Arnalds', genre:'Electronic',            desc:'Ethereal Icelandic soundscapes that wrap you in serene calm.',              tag:'Ethereal',  color:'#6ee7b7', img:'🌙' },
+      { title:'Takk...',            artist:'Sigur Rós',      genre:'Post-Rock',             desc:'Glacial, otherworldly music that makes the world feel enormous and peaceful.',tag:'Cinematic', color:'#c4b5fd', img:'🎧' },
+      { title:'Sleep',              artist:'Max Richter',    genre:'Contemporary Classical', desc:'An 8-hour composition designed for rest — even a few minutes helps.',       tag:'Rest',      color:'#93c5fd', img:'🎶' },
+    ],
+    youtube: [
+      { title:'10-Min Guided Breathing',     channel:'Headspace',         desc:'A simple, effective breathing session to settle an anxious mind.',               tag:'Wellness', color:'#a78bfa', img:'🧘' },
+      { title:'ASMR: Rainy Library Reading', channel:'Gentle Whispering', desc:'Ultra-relaxing sounds of rain and turning pages — deeply calming.',              tag:'ASMR',     color:'#6ee7b7', img:'📚' },
+      { title:'Planet Earth: Ocean Depths',  channel:'BBC',               desc:'Stunning underwater cinematography narrated by Sir David Attenborough.',         tag:'Nature',   color:'#0ea5e9', img:'🌊' },
+      { title:'Bob Ross: Happy Little Trees',channel:'Bob Ross',          desc:'The most calming painting show ever made. Guaranteed to slow your heart rate.', tag:'Art',      color:'#34d399', img:'🌳' },
+    ],
+  },
+  excited: {
+    movies: [
+      { title:'Mad Max: Fury Road', genre:'Action',    year:2015, rating:8.1, desc:'Two hours of relentless, brilliant, high-octane fury — cinema as pure adrenaline.', tag:'Adrenaline',   color:'#f97316', img:'🚗' },
+      { title:'Top Gun: Maverick',  genre:'Action',    year:2022, rating:8.3, desc:'An exhilarating throwback blockbuster that reminds you why movies are magic.',      tag:'Epic',         color:'#3b82f6', img:'✈️' },
+      { title:'John Wick',          genre:'Action',    year:2014, rating:7.4, desc:'Breathtakingly choreographed action that never lets up — pure kinetic energy.',     tag:'Intense',      color:'#f43f5e', img:'🔫' },
+      { title:'Interstellar',       genre:'Sci-Fi',    year:2014, rating:8.7, desc:'A mind-bending cosmic odyssey that channels your excitement into the infinite.',    tag:'Mind-Blowing', color:'#8b5cf6', img:'🚀' },
+      { title:'The Dark Knight',    genre:'Superhero', year:2008, rating:9.0, desc:'The definitive superhero film — thrilling, complex, and endlessly rewatchable.',    tag:'Legendary',    color:'#475569', img:'🦇' },
+    ],
+    music: [
+      { title:'Get Lucky',           artist:'Daft Punk',     genre:'Electronic', desc:'An irresistible, euphoric dance track channelling pure momentum and joy.',           tag:'Euphoric',     color:'#f97316', img:'🎵' },
+      { title:'Blinding Lights',     artist:'The Weeknd',    genre:'Synth-Pop',  desc:"Neon-drenched, pulse-racing synth-pop that makes you feel like you're in a movie.", tag:'Drive',        color:'#ec4899', img:'🎶' },
+      { title:'Summer',              artist:'Calvin Harris', genre:'Dance',      desc:'The ultimate summer anthem — made for open roads and big feelings.',                 tag:'Festival',     color:'#fbbf24', img:'🔊' },
+      { title:'HUMBLE.',             artist:'Kendrick Lamar',genre:'Hip-Hop',    desc:'A sharp, powerful banger with production that hits like a freight train.',           tag:'Powerful',     color:'#ef4444', img:'🎤' },
+      { title:'Killing in the Name', artist:'RATM',          genre:'Rock',       desc:'One of the most electrifying rock tracks ever recorded — pure unleashed energy.',    tag:'Electrifying', color:'#dc2626', img:'🎸' },
+    ],
+    youtube: [
+      { title:'Best Sporting Moments 2024',  channel:'ESPN',               desc:'The most jaw-dropping, heart-stopping athletic feats from the past year.',    tag:'Sports',    color:'#f97316', img:'🏆' },
+      { title:'Free Solo: Extreme Climbing', channel:'National Geographic', desc:'Breathtaking footage of climbers conquering impossible peaks without ropes.', tag:'Extreme',   color:'#ef4444', img:'🧗' },
+      { title:'Most Inspiring TED Talks',    channel:'TED',                desc:'Ideas worth spreading — talks that fire up your ambition and imagination.',    tag:'Inspiring', color:'#3b82f6', img:'💡' },
+      { title:'Epic Car Chase Compilation',  channel:'Top Gear',           desc:'The most incredible driving sequences ever captured on film.',                  tag:'Adrenaline',color:'#f59e0b', img:'🏎️' },
+    ],
+  },
+  calm: {
+    movies: [
+      { title:'My Neighbor Totoro', genre:'Animation', year:1988, rating:8.2, desc:'A gentle, timeless Ghibli classic that is pure warmth and childlike wonder.',           tag:'Gentle',        color:'#34d399', img:'🌿' },
+      { title:'Julie & Julia',      genre:'Drama',     year:2009, rating:7.0, desc:'A warm, nourishing story about passion, food, and finding your purpose.',               tag:'Warm',          color:'#f59e0b', img:'👩‍🍳' },
+      { title:'Moonrise Kingdom',   genre:'Comedy',    year:2012, rating:7.8, desc:"Wes Anderson's most tender film — a quiet, beautiful love story for dreamers.",         tag:'Dreamy',        color:'#f97316', img:'🏕️' },
+      { title:'Columbus',           genre:'Drama',     year:2017, rating:7.5, desc:'A quiet, contemplative film where architecture and emotion intertwine perfectly.',       tag:'Contemplative', color:'#94a3b8', img:'🏛️' },
+      { title:'Paterson',           genre:'Drama',     year:2016, rating:7.4, desc:'A week in the life of a bus driver who writes poetry — pure, mindful cinema.',          tag:'Mindful',       color:'#60a5fa', img:'📝' },
+    ],
+    music: [
+      { title:'Pink Moon',                  artist:'Nick Drake',           genre:'Folk',       desc:'Sparse, intimate guitar and vocals — like a quiet evening by the window.',  tag:'Intimate',    color:'#34d399', img:'🌙' },
+      { title:'In Our Nature',              artist:'José González',        genre:'Acoustic',   desc:'Fingerpicked guitar that feels like a cool breeze on a warm afternoon.',    tag:'Acoustic',    color:'#86efac', img:'🎸' },
+      { title:'The Creek Drank the Cradle', artist:'Iron & Wine',          genre:'Folk',       desc:'Whispered folk songs that feel like home — unhurried and deeply peaceful.', tag:'Folk',        color:'#a16207', img:'🎵' },
+      { title:'Take Care Take Care',        artist:'Explosions in the Sky',genre:'Post-Rock',  desc:'Instrumental waves of guitar that wash over you like a slow tide.',         tag:'Instrumental',color:'#0ea5e9', img:'🎶' },
+      { title:'Interstellar OST',           artist:'Hans Zimmer',          genre:'Orchestral', desc:'Majestic, sweeping organ and strings that expand your sense of self.',       tag:'Orchestral',  color:'#8b5cf6', img:'🎼' },
+    ],
+    youtube: [
+      { title:'Slow TV: Bergen to Oslo Train', channel:'NRK',                   desc:'Seven hours of Norwegian scenery from a train window — meditative and beautiful.', tag:'Slow TV', color:'#34d399', img:'🚂' },
+      { title:'Bob Ross: Season 1 Marathon',   channel:'Bob Ross Inc',          desc:'Happy little trees and total serenity — the original mindfulness content.',       tag:'Art',     color:'#86efac', img:'🎨' },
+      { title:'Aquarium 4K Livestream',        channel:'Monterey Bay Aquarium', desc:'Live deep-sea creatures drifting by in 4K. Deeply, profoundly calming.',         tag:'Nature',  color:'#0ea5e9', img:'🐠' },
+      { title:'Peaceful Japanese Forest Walk', channel:'Ambience Walks',        desc:'A 2-hour first-person walk through a tranquil Japanese forest.',                  tag:'Walk',    color:'#4ade80', img:'🌲' },
+    ],
+  },
+  angry: {
+    movies: [
+      { title:'Whiplash',          genre:'Drama',  year:2014, rating:8.5, desc:'An intense, electrifying film about obsession, ambition, and pushing your limits.',          tag:'Intense',   color:'#f87171', img:'🥁' },
+      { title:'Fight Club',        genre:'Drama',  year:1999, rating:8.8, desc:'A savage, cathartic deconstruction of modern masculinity and consumer culture.',             tag:'Cathartic', color:'#ef4444', img:'👊' },
+      { title:'Joker',             genre:'Drama',  year:2019, rating:8.4, desc:'A raw, provocative portrait of what happens when society ignores its most vulnerable.',       tag:'Raw',       color:'#dc2626', img:'🃏' },
+      { title:'Network',           genre:'Drama',  year:1976, rating:8.1, desc:'The original "mad as hell" film — savage satire that still cuts deep today.',               tag:'Satire',    color:'#f97316', img:'📺' },
+      { title:'Mad Max: Fury Road',genre:'Action', year:2015, rating:8.1, desc:'Channel your energy into two hours of cinematic fury and brilliant chaos.',                 tag:'Release',   color:'#b45309', img:'🔥' },
+    ],
+    music: [
+      { title:'B.Y.O.B.',               artist:'System of a Down', genre:'Metal',     desc:'Explosive, politically charged metal that turns frustration into cathartic release.', tag:'Release',    color:'#f87171', img:'🎸' },
+      { title:'Numb',                   artist:'Linkin Park',      genre:'Nu-Metal',   desc:'A generation-defining anthem for feeling misunderstood and unheard.',               tag:'Anthem',     color:'#64748b', img:'🎵' },
+      { title:'Closer',                 artist:'Nine Inch Nails',  genre:'Industrial', desc:'Raw, industrial aggression transformed into a sonic experience.',                   tag:'Industrial', color:'#78716c', img:'🎶' },
+      { title:'POWER',                  artist:'Kanye West',       genre:'Hip-Hop',    desc:'Bombastic, symphonic hip-hop that makes you feel invincible and righteous.',        tag:'Power',      color:'#dc2626', img:'🎤' },
+      { title:'How Much a Dollar Cost', artist:'Kendrick Lamar',   genre:'Hip-Hop',    desc:'Profound and furious — hip-hop that forces uncomfortable truths.',                  tag:'Profound',   color:'#f43f5e', img:'🎼' },
+    ],
+    youtube: [
+      { title:'Most Satisfying Fails',          channel:'FailArmy',      desc:'Watching things go hilariously wrong — strangely therapeutic.',                   tag:'Satisfying', color:'#f87171', img:'😅' },
+      { title:'Best Roasts & Comeback Moments', channel:'Comedy Central', desc:'Legendary clap-backs and roasts that channel frustration into laughter.',         tag:'Comedy',     color:'#f97316', img:'🔥' },
+      { title:'Workout Motivation: Beast Mode',  channel:'ATHLEAN-X',    desc:'Turn that energy into fuel — intense workout motivation to channel anger.',       tag:'Fitness',    color:'#ef4444', img:'💪' },
+      { title:'The Most Satisfying Videos',     channel:'SatisfyingVideo',desc:'Perfect cuts, clean lines, and things fitting together exactly as they should.', tag:'Satisfying', color:'#34d399', img:'✅' },
+    ],
+  },
+  romantic: {
+    movies: [
+      { title:'Before Sunrise',             genre:'Romance', year:1995, rating:8.1, desc:'Two strangers talk through the night in Vienna — the most romantic conversation film ever.', tag:'Timeless', color:'#f472b6', img:'🌅' },
+      { title:'When Harry Met Sally',       genre:'Romance', year:1989, rating:7.6, desc:'The definitive romantic comedy — warm, witty, and endlessly quotable.',                     tag:'Classic',  color:'#ec4899', img:'🥂' },
+      { title:'Crazy, Stupid, Love',        genre:'Romance', year:2011, rating:7.4, desc:'A funny, charming, heartfelt look at love in all its complicated, beautiful forms.',        tag:'Charming', color:'#f43f5e', img:'💋' },
+      { title:'Notting Hill',               genre:'Romance', year:1999, rating:7.1, desc:'A sweet, endearing love story between a bookshop owner and a Hollywood star.',              tag:'Sweet',    color:'#fb7185', img:'📚' },
+      { title:'Portrait of a Lady on Fire', genre:'Drama',   year:2019, rating:8.1, desc:'A visually stunning, emotionally charged love story told with rare intimacy.',              tag:'Intimate', color:'#f97316', img:'🎨' },
+    ],
+    music: [
+      { title:'The Way You Look Tonight',artist:'Frank Sinatra', genre:'Jazz',     desc:'Timeless, velvet-voiced romance — the song that never gets old.',                 tag:'Timeless',  color:'#f472b6', img:'🎵' },
+      { title:'Come Away with Me',       artist:'Norah Jones',   genre:'Jazz Pop', desc:'Warm, intimate piano and vocals that feel like a slow dance in candlelight.',     tag:'Intimate',  color:'#fbbf24', img:'🕯️' },
+      { title:'Gravity',                 artist:'John Mayer',    genre:'Blues',    desc:'Silky guitar and tender vocals — a love letter in musical form.',                 tag:'Tender',    color:'#6366f1', img:'🎸' },
+      { title:'Someone Like You',        artist:'Adele',         genre:'Pop',      desc:'One of the most emotionally powerful love songs of the modern era.',              tag:'Powerful',  color:'#94a3b8', img:'🎤' },
+      { title:'Perfect',                 artist:'Ed Sheeran',    genre:'Pop',      desc:'A beautifully written, earnest love song that captures the feeling perfectly.',   tag:'Beautiful', color:'#f87171', img:'🎶' },
+    ],
+    youtube: [
+      { title:"World's Most Romantic Destinations", channel:'Expedia',           desc:'Dreamy destinations perfect for couples — Paris, Kyoto, Santorini.',           tag:'Travel',     color:'#f472b6', img:'🗺️' },
+      { title:'Best Restaurant Date Night Ideas',   channel:'Bon Appétit',       desc:'Romantic recipes and restaurant ideas to make any evening special.',           tag:'Date Night', color:'#f97316', img:'🍷' },
+      { title:'Sunset Timelapses Around the World', channel:'Nature Relaxation', desc:'Golden hour skies from the most beautiful corners of the planet.',             tag:'Sunset',     color:'#f59e0b', img:'🌇' },
+      { title:'Classic Movie Romance Scenes',       channel:'Movieclips',        desc:'The most iconic romantic moments in cinema history, compiled for your heart.', tag:'Cinema',     color:'#ec4899', img:'🎬' },
+    ],
+  },
+  bored: {
+    movies: [
+      { title:'Everything Everywhere All at Once', genre:'Sci-Fi',      year:2022, rating:7.8, desc:'A wildly inventive multiverse adventure that will completely rearrange your brain.',         tag:'Mind-Bending', color:'#a855f7', img:'🌀' },
+      { title:'The Big Short',                    genre:'Comedy-Drama', year:2015, rating:7.8, desc:'A brilliantly entertaining explanation of the 2008 financial crisis — infuriating and fun.',tag:'Educational',  color:'#f59e0b', img:'💰' },
+      { title:'Knives Out',                       genre:'Mystery',      year:2019, rating:7.9, desc:'A deliciously twisty whodunit that subverts every expectation you have.',                   tag:'Twisty',       color:'#06b6d4', img:'🔪' },
+      { title:'Parasite',                         genre:'Thriller',     year:2019, rating:8.5, desc:'A perfectly constructed genre-defying masterpiece that grips you to the last frame.',       tag:'Masterpiece',  color:'#10b981', img:'🏠' },
+      { title:'The Social Network',               genre:'Drama',        year:2010, rating:7.8, desc:"Aaron Sorkin's razor-sharp script makes founding Facebook one of cinema's most riveting stories.", tag:'Riveting', color:'#3b82f6', img:'💻' },
+    ],
+    music: [
+      { title:'Currents',            artist:'Tame Impala',     genre:'Psychedelic',    desc:'Dreamy psychedelic pop that takes you somewhere unexpected and new.',            tag:'Explore',      color:'#a855f7', img:'🎵' },
+      { title:'Sound of Silver',     artist:'LCD Soundsystem', genre:'Electronic',     desc:'Witty, danceable, and deeply original — the coolest record of the 2000s.',      tag:'Cool',         color:'#64748b', img:'🎶' },
+      { title:'OK Computer',         artist:'Radiohead',       genre:'Alt Rock',       desc:'A landmark album that rewards every listen with something new to discover.',     tag:'Landmark',     color:'#475569', img:'🎸' },
+      { title:'The Suburbs',         artist:'Arcade Fire',     genre:'Indie Rock',     desc:'A grand, sprawling indie epic about nostalgia, time, and what we leave behind.',tag:'Epic',         color:'#f97316', img:'🏘️' },
+      { title:'Oracular Spectacular',artist:'MGMT',            genre:'Psychedelic Pop',desc:'Weird, wonderful, impossible to categorize — perfect for jolting yourself awake.',tag:'Weird & Great',color:'#06b6d4', img:'🎤' },
+    ],
+    youtube: [
+      { title:'50 Things About Space',         channel:'Kurzgesagt',     desc:'Mind-expanding facts about the universe with stunning animation.',              tag:'Mind-Blowing',color:'#8b5cf6', img:'🚀' },
+      { title:'Most Mysterious Unsolved Cases',channel:'Bright Side',    desc:'Strange, compelling mysteries that will occupy your brain for days.',           tag:'Mystery',     color:'#475569', img:'🔍' },
+      { title:'Incredible Science Experiments',channel:'Mark Rober',     desc:'Engineering genius + creative chaos = hours of genuinely impressive content.', tag:'Science',     color:'#06b6d4', img:'🧪' },
+      { title:"Ranking Every Country's Food",  channel:'Joshua Weissman',desc:'A hilarious, mouth-watering deep dive into global cuisine.',                   tag:'Food',        color:'#f97316', img:'🌍' },
+    ],
+  },
+};
+
+/* ── js/engine.js ───────────────────────────────────────── */
+
+const GROQ_MODEL    = 'llama-3.3-70b-versatile';
+const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
+const VALID_EMOTIONS = ['happy','sad','anxious','excited','calm','angry','romantic','bored'];
+
+const SYSTEM_PROMPT = `You are an expert emotion detection AI for MoodStream, a personalised streaming platform. Your only job is to analyse a user's mood description and classify it into exactly one emotion category.
+
+The 8 categories are: happy, sad, anxious, excited, calm, angry, romantic, bored.
+
+Guidelines:
+- "happy"    → joy, elation, gratitude, contentment with positive energy
+- "sad"      → grief, loneliness, heartbreak, nostalgia, feeling low
+- "anxious"  → stress, worry, overwhelm, nervousness, panic
+- "excited"  → hype, motivation, anticipation, adrenaline, feeling pumped
+- "calm"     → peace, serenity, chill, relaxation, quietness
+- "angry"    → frustration, irritation, rage, resentment, being fed up
+- "romantic" → love, longing, tenderness, being in love, missing someone romantically
+- "bored"    → restlessness, numbness, indifference, needing stimulation
+
+You MUST respond with ONLY a valid JSON object. No markdown, no extra text outside the JSON.
+
+Response format:
+{
+  "emotion": "<one of the 8 categories>",
+  "confidence": <integer 0-100>,
+  "reason": "<one warm sentence directed at the user explaining why>",
+  "secondary": "<optional second emotion if strongly present, or null>"
+}`;
+
+async function detectEmotionWithGroq(apiKey, text, energy, intent) {
+  const energyLabel = ['','very drained','a bit low on energy','moderate energy','fairly energetic','very wired'][energy];
+  const intentLabel = { escape:'escape reality', relate:'feel understood', energize:'get motivated', relax:'slow down and rest' }[intent] || intent;
+
+  const userMessage =
+    `How I'm feeling: "${text}"\n` +
+    `My energy level: ${energyLabel} (${energy}/5)\n` +
+    `What I want from content right now: ${intentLabel}\n\nPlease detect my emotion.`;
+
+  const response = await fetch(GROQ_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: GROQ_MODEL,
+      messages: [{ role:'system', content:SYSTEM_PROMPT }, { role:'user', content:userMessage }],
+      temperature: 0.3,
+      max_tokens: 200,
+      response_format: { type:'json_object' },
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `Groq returned HTTP ${response.status}`);
+  }
+
+  const data   = await response.json();
+  const parsed = JSON.parse(data.choices?.[0]?.message?.content || '{}');
+  if (!VALID_EMOTIONS.includes(parsed.emotion)) throw new Error(`Unexpected emotion: "${parsed.emotion}"`);
+
+  return {
+    emotion:    parsed.emotion,
+    confidence: Math.max(0, Math.min(100, Number(parsed.confidence) || 75)),
+    reason:     parsed.reason    || 'Your mood has been detected.',
+    secondary:  VALID_EMOTIONS.includes(parsed.secondary) ? parsed.secondary : null,
+  };
+}
+
+const EMOTION_KEYWORDS = {
+  happy:    ['happy','great','good','wonderful','joyful','amazing','fantastic','cheerful','elated','thrilled','glad','awesome','blessed','grateful','ecstatic'],
+  sad:      ['sad','down','depressed','unhappy','crying','cry','lonely','miss','hurt','heartbroken','grief','lost','empty','hopeless','melancholy','blue','miserable'],
+  anxious:  ['anxious','stressed','worried','nervous','overwhelmed','panic','anxiety','fear','scared','tense','pressure','burden','overthinking','restless'],
+  excited:  ['excited','pumped','thrilled','hyped','energized','ready','motivated','fired','alive','electric','stoked','adrenaline'],
+  calm:     ['calm','peaceful','relaxed','quiet','serene','chill','tranquil','content','still','zen','mellow','easy','gentle','soft','cozy'],
+  angry:    ['angry','mad','frustrated','annoyed','irritated','furious','rage','upset','bitter','hate','resentful'],
+  romantic: ['romantic','love','crush','date','miss','longing','affection','heart','soulmate','feelings','warm','tender','intimate'],
+  bored:    ['bored','nothing','meh','blah','listless','uninterested','monotonous','dull','flat','numb','indifferent'],
+};
+
+function detectEmotionFallback(text, energy, intent) {
+  const lower  = text.toLowerCase();
+  const scores = {};
+  for (const [emotion, keywords] of Object.entries(EMOTION_KEYWORDS)) {
+    scores[emotion] = keywords.filter(k => lower.includes(k)).length;
+  }
+  if (energy >= 4) { scores.excited = (scores.excited||0) + 1.5; scores.happy = (scores.happy||0) + 0.5; }
+  if (energy <= 2) { scores.calm    = (scores.calm||0)    + 1.0; scores.sad   = (scores.sad||0)   + 0.5; }
+  if (intent === 'energize') scores.excited = (scores.excited||0) + 1;
+  if (intent === 'relax')    scores.calm    = (scores.calm||0)    + 1;
+  if (intent === 'relate')   scores.sad     = (scores.sad||0)     + 0.5;
+  if (intent === 'escape')   scores.anxious = (scores.anxious||0) + 0.5;
+  const sorted = Object.entries(scores).sort((a,b) => b[1]-a[1]);
+  return { emotion: sorted[0][1] > 0 ? sorted[0][0] : 'calm', confidence:60, reason:'Detected using offline keyword analysis (AI not connected).', secondary: sorted[1]?.[1] > 0 ? sorted[1][0] : null };
+}
+
+/* ── js/components.js ───────────────────────────────────── */
+
+const { useState, useEffect } = React;
+
+function StarRating({ rating }) {
+  const full = Math.floor(rating/2), half = rating%2 >= 1;
+  return (
+    <span>
+      {[...Array(5)].map((_,i) => <span key={i} className="star">{i<full?'★':(i===full&&half?'⯨':'☆')}</span>)}
+      <span style={{ color:'var(--text-muted)', fontSize:11, marginLeft:4 }}>{rating}/10</span>
+    </span>
+  );
+}
+
+function ContentCard({ item, type }) {
+  return (
+    <div className="content-card" style={{ minWidth:220, maxWidth:240 }}>
+      <div style={{ height:110, display:'flex', alignItems:'center', justifyContent:'center', background:`linear-gradient(135deg,${item.color}22,${item.color}44)`, fontSize:48, position:'relative' }}>
+        <span style={{ animation:'float 3s ease-in-out infinite' }}>{item.img}</span>
+        <span className="badge" style={{ position:'absolute', top:8, right:8, background:item.color+'33', color:item.color, border:`1px solid ${item.color}55` }}>{item.tag}</span>
+      </div>
+      <div style={{ padding:'14px 16px' }}>
+        <div style={{ fontWeight:700, fontSize:14, marginBottom:4, lineHeight:1.3 }}>{item.title}</div>
+        {type==='movies'  && <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}><span style={{ fontSize:11, color:'var(--text-muted)', background:'var(--surface2)', padding:'2px 7px', borderRadius:5 }}>{item.genre}</span><span style={{ fontSize:11, color:'var(--text-muted)' }}>{item.year}</span></div>}
+        {type==='music'   && <div style={{ fontSize:12, color:item.color, fontWeight:600, marginBottom:6 }}>{item.artist} · {item.genre}</div>}
+        {type==='youtube' && <div style={{ fontSize:12, color:item.color, fontWeight:600, marginBottom:6 }}>📺 {item.channel}</div>}
+        {type==='movies'  && <StarRating rating={item.rating} />}
+        <p style={{ fontSize:12, color:'var(--text-muted)', marginTop:6, lineHeight:1.5 }}>{item.desc}</p>
+        <button style={{ marginTop:10, width:'100%', padding:'8px 0', background:item.color+'22', border:`1px solid ${item.color}44`, borderRadius:8, color:item.color, fontSize:12, fontWeight:600, cursor:'pointer', transition:'background .2s', fontFamily:'Inter,sans-serif' }}
+          onMouseOver={e=>e.currentTarget.style.background=item.color+'44'}
+          onMouseOut ={e=>e.currentTarget.style.background=item.color+'22'}>
+          {type==='movies'?'▶ Watch Trailer':type==='music'?'▶ Listen Now':'▶ Watch Now'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ContentSection({ title, icon, items, type }) {
+  return (
+    <div style={{ marginBottom:32 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16 }}>
+        <span style={{ fontSize:22 }}>{icon}</span>
+        <h3 style={{ fontSize:18, fontWeight:700 }}>{title}</h3>
+        <span style={{ fontSize:13, color:'var(--text-muted)', marginLeft:4 }}>{items.length} picks</span>
+      </div>
+      <div className="scroll-row">
+        {items.map((item,i) => (
+          <div key={i} style={{ animation:`slideIn 0.4s ease ${i*.08}s forwards`, opacity:0 }}>
+            <ContentCard item={item} type={type} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ConfidenceBar({ value, color }) {
+  const [width, setWidth] = useState(0);
+  useEffect(() => { const t = setTimeout(()=>setWidth(value),100); return ()=>clearTimeout(t); }, [value]);
+  return (
+    <div>
+      <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6, fontSize:12, color:'var(--text-muted)' }}>
+        <span>AI Confidence</span><span style={{ color, fontWeight:700 }}>{value}%</span>
+      </div>
+      <div className="conf-bar-track">
+        <div className="conf-bar-fill" style={{ width:`${width}%`, background:`linear-gradient(90deg,${color}99,${color})` }} />
+      </div>
+    </div>
+  );
+}
+
+function SettingsModal({ apiKey, onSave, onClose }) {
+  const [val, setVal] = useState(apiKey||'');
+  const [showKey, setShowKey] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+
+  async function handleTest() {
+    if (!val.trim()) return;
+    setTesting(true); setTestResult(null);
+    try {
+      const res = await detectEmotionWithGroq(val.trim(),'I feel happy and excited today',4,'energize');
+      setTestResult({ ok:true, msg:`✓ Connected! Test result: ${res.emotion} (${res.confidence}% confidence)` });
+    } catch(e) { setTestResult({ ok:false, msg:`✗ ${e.message}` }); }
+    setTesting(false);
+  }
+
+  return (
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="card fade-in" style={{ width:'100%', maxWidth:460, padding:32 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:24 }}>
+          <h2 style={{ fontSize:20, fontWeight:800 }}>⚙️ Groq API Settings</h2>
+          <button className="btn-ghost" style={{ padding:'6px 12px' }} onClick={onClose}>✕</button>
+        </div>
+        <p style={{ color:'var(--text-muted)', fontSize:14, marginBottom:20, lineHeight:1.6 }}>
+          MoodStream uses <strong style={{ color:'var(--text)' }}>Groq · {GROQ_MODEL}</strong> to detect your emotion. Your key is stored in memory only.
+        </p>
+        <div style={{ background:'rgba(108,99,255,.08)', border:'1px solid rgba(108,99,255,.2)', borderRadius:10, padding:'12px 16px', marginBottom:20, fontSize:13, color:'var(--text-muted)', lineHeight:1.7 }}>
+          🔑 <strong style={{ color:'var(--text)' }}>Get a free key:</strong> <span style={{ color:'#a78bfa' }}>console.groq.com</span> → API Keys → Create new key
+        </div>
+        <label style={{ fontSize:13, color:'var(--text-muted)', display:'block', marginBottom:8 }}>Groq API Key</label>
+        <div className="key-input-wrap" style={{ marginBottom:16 }}>
+          <input className="form-input" type={showKey?'text':'password'} placeholder="gsk_..." value={val} onChange={e=>{setVal(e.target.value);setTestResult(null);}} style={{ paddingRight:44 }} />
+          <button className="toggle-eye" onClick={()=>setShowKey(s=>!s)}>{showKey?'🙈':'👁️'}</button>
+        </div>
+        {testResult && (
+          <div style={{ padding:'10px 14px', borderRadius:10, marginBottom:16, fontSize:13, fontWeight:500, background:testResult.ok?'rgba(52,211,153,.1)':'rgba(239,68,68,.1)', border:`1px solid ${testResult.ok?'rgba(52,211,153,.3)':'rgba(239,68,68,.3)'}`, color:testResult.ok?'#34d399':'#f87171' }}>
+            {testResult.msg}
+          </div>
+        )}
+        <div style={{ display:'flex', gap:10 }}>
+          <button className="btn-ghost" style={{ flex:1 }} onClick={handleTest} disabled={!val.trim()||testing}>{testing?'⏳ Testing…':'🧪 Test Key'}</button>
+          <button className="btn-primary" style={{ flex:2 }} disabled={!val.trim()} onClick={()=>{onSave(val.trim());onClose();}}>Save &amp; Continue →</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── js/app.js ──────────────────────────────────────────── */
+
+function App() {
+  const [step,            setStep]            = useState('apikey');
+  const [apiKey, setApiKey] = useState('');
+  const [showSettings,    setShowSettings]    = useState(false);
+  const [formStep,        setFormStep]        = useState(1);
+  const [formData,        setFormData]        = useState({ text:'', words:[], energy:3, intent:'' });
+  const [result,          setResult]          = useState(null);
+  const [activeTab,       setActiveTab]       = useState('movies');
+  const [analyzeProgress, setAnalyzeProgress] = useState(0);
+  const [analyzeMsg,      setAnalyzeMsg]      = useState('');
+  const [apiError,        setApiError]        = useState(null);
+  const [usedFallback,    setUsedFallback]    = useState(false);
+
+  const ec = result ? EMOTION_CONFIG[result.emotion] : null;
+
+  function handleWordToggle(word) {
+    setFormData(fd => {
+      const words = fd.words.includes(word) ? fd.words.filter(w=>w!==word) : [...fd.words, word];
+      const text  = fd.text.includes(word) ? fd.text : fd.text + (fd.text?', ':'') + word;
+      return { ...fd, words, text };
+    });
+  }
+
+  async function handleAnalyze() {
+    setStep('analyzing'); setAnalyzeProgress(0); setApiError(null); setUsedFallback(false);
+    const MSGS = ['Reading your words…','Understanding your feeling…','Detecting emotional patterns…','Matching your mood…','Curating your content…'];
+    let idx = 0; setAnalyzeMsg(MSGS[0]);
+    const timer = setInterval(() => {
+      setAnalyzeProgress(p => {
+        const next = Math.min(p + Math.random()*12+3, 85);
+        const ni   = Math.min(Math.floor(next/20), MSGS.length-1);
+        if (ni !== idx) { idx = ni; setAnalyzeMsg(MSGS[ni]); }
+        if (next >= 85) clearInterval(timer);
+        return next;
+      });
+    }, 180);
+
+    let detected;
+    try {
+      if (!apiKey || apiKey === 'demo') throw new Error('No API key — using offline mode.');
+      detected = await detectEmotionWithGroq(apiKey, formData.text, formData.energy, formData.intent);
+    } catch(err) {
+      clearInterval(timer);
+      setUsedFallback(true); setApiError(err.message);
+      detected = detectEmotionFallback(formData.text, formData.energy, formData.intent);
+    }
+
+    setAnalyzeMsg('All set!'); setAnalyzeProgress(100); setResult(detected);
+    setTimeout(() => { setStep('results'); setActiveTab('movies'); }, 500);
+  }
+
+  function reset() {
+    setStep('home'); setFormStep(1); setFormData({ text:'', words:[], energy:3, intent:'' });
+    setResult(null); setApiError(null); setUsedFallback(false);
+  }
+
+  const canAdvance1 = formData.text.trim().length >= 3;
+  const canAnalyze  = formData.intent !== '';
+
+  /* ── Screen: API Key ── */
+  if (step === 'apikey') return (
+    <div style={{ minHeight:'100vh', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:24, position:'relative', overflow:'hidden' }}>
+      <div className="noise-bg" />
+      <div className="orb" style={{ width:500, height:500, top:-100, left:-100, background:'rgba(108,99,255,.12)' }} />
+      <div className="orb" style={{ width:400, height:400, bottom:-80, right:-80, background:'rgba(168,85,247,.10)' }} />
+      <div className="card fade-in" style={{ width:'100%', maxWidth:460, padding:40, position:'relative', zIndex:1 }}>
+        <div style={{ textAlign:'center', marginBottom:32 }}>
+          <div style={{ fontSize:56, marginBottom:12, animation:'float 3s ease-in-out infinite' }}>🎭</div>
+          <h1 style={{ fontSize:26, fontWeight:900, marginBottom:8 }}>Welcome to <span style={{ background:'linear-gradient(135deg,#6c63ff,#a855f7)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent' }}>MoodStream</span></h1>
+          <p style={{ color:'var(--text-muted)', fontSize:14, lineHeight:1.6 }}>Connect your Groq API key to enable AI-powered emotion detection. Your key never leaves your browser.</p>
+        </div>
+        <div style={{ background:'rgba(108,99,255,.08)', border:'1px solid rgba(108,99,255,.2)', borderRadius:12, padding:'14px 18px', marginBottom:24, display:'flex', alignItems:'flex-start', gap:12 }}>
+          <span style={{ fontSize:20, marginTop:1 }}>🔑</span>
+          <div>
+            <div style={{ fontSize:13, fontWeight:600, marginBottom:4 }}>How to get a free Groq key</div>
+            <div style={{ fontSize:12, color:'var(--text-muted)', lineHeight:1.7 }}>
+              1. Go to <span style={{ color:'#a78bfa' }}>console.groq.com</span><br/>
+              2. Sign up (free) → API Keys → Create new key<br/>
+              3. Paste it below — fast LLM calls on the free tier
+            </div>
+          </div>
+        </div>
+        <label style={{ fontSize:13, color:'var(--text-muted)', display:'block', marginBottom:8 }}>Groq API Key</label>
+        <div className="key-input-wrap" style={{ marginBottom:20 }}>
+          <input className="form-input" type="password" placeholder="gsk_..." value={apiKey} onChange={e=>setApiKey(e.target.value)} onKeyDown={e=>e.key==='Enter'&&apiKey.trim()&&setStep('home')} />
+        </div>
+        <button className="btn-primary" style={{ width:'100%', fontSize:16 }} disabled={!apiKey.trim()} onClick={()=>setStep('home')}>Start MoodStream →</button>
+        <button style={{ background:'none', border:'none', color:'var(--text-muted)', fontSize:13, marginTop:14, cursor:'pointer', width:'100%', fontFamily:'Inter,sans-serif', textDecoration:'underline' }} onClick={()=>{setApiKey('demo');setStep('home');}}>
+          Skip for now (use offline keyword detection)
+        </button>
+      </div>
+    </div>
+  );
+
+  /* ── Screen: Home ── */
+  if (step === 'home') return (
+    <div style={{ minHeight:'100vh', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:24, position:'relative', overflow:'hidden' }}>
+      <div className="noise-bg" />
+      <div className="orb" style={{ width:500, height:500, top:-100, left:-100, background:'rgba(108,99,255,.12)' }} />
+      <div className="orb" style={{ width:400, height:400, bottom:-80, right:-80, background:'rgba(168,85,247,.10)' }} />
+      <div style={{ position:'fixed', top:0, left:0, right:0, padding:'16px 24px', display:'flex', justifyContent:'space-between', alignItems:'center', zIndex:10, background:'linear-gradient(to bottom,rgba(10,10,15,.9),transparent)', backdropFilter:'blur(8px)' }}>
+        <span style={{ fontWeight:900, fontSize:18, background:'linear-gradient(135deg,#6c63ff,#a855f7)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent' }}>MoodStream</span>
+        <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+          {apiKey&&apiKey!=='demo'?<span style={{ fontSize:12, color:'var(--text-muted)', display:'flex', alignItems:'center', gap:6 }}><span className="success-dot"/>AI Active</span>:<span style={{ fontSize:12, color:'var(--text-muted)' }}>Offline mode</span>}
+          <button className="btn-ghost" style={{ padding:'7px 12px', fontSize:13 }} onClick={()=>setShowSettings(true)}>⚙️ Settings</button>
+        </div>
+      </div>
+      <div className="fade-in" style={{ textAlign:'center', maxWidth:560, position:'relative', zIndex:1 }}>
+        <div style={{ fontSize:72, marginBottom:16, animation:'float 3s ease-in-out infinite' }}>🎭</div>
+        <h1 style={{ fontSize:'clamp(30px,6vw,50px)', fontWeight:900, lineHeight:1.1, marginBottom:16 }}>
+          Watch <span style={{ background:'linear-gradient(135deg,#6c63ff,#a855f7)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent' }}>how you feel</span>
+        </h1>
+        <p style={{ fontSize:16, color:'var(--text-muted)', lineHeight:1.7, marginBottom:16 }}>
+          Tell us how you're feeling and <strong style={{ color:'var(--text)' }}>MoodStream</strong> uses AI to curate the perfect movies, music, and videos for your mood.
+        </p>
+        <div style={{ marginBottom:40 }}><span className="llm-badge">✦ Powered by Groq · {GROQ_MODEL}</span></div>
+        <div style={{ display:'flex', gap:10, justifyContent:'center', flexWrap:'wrap', marginBottom:48 }}>
+          {Object.entries(EMOTION_CONFIG).map(([k,c])=>(
+            <span key={k} style={{ padding:'6px 14px', borderRadius:999, background:c.bg, color:c.color, fontSize:13, fontWeight:600, border:`1px solid ${c.color}33` }}>{c.emoji} {c.label}</span>
+          ))}
+        </div>
+        <button className="btn-primary" style={{ fontSize:17, padding:'16px 40px' }} onClick={()=>setStep('form')}>Discover my mood →</button>
+        <p style={{ marginTop:16, fontSize:13, color:'var(--text-muted)' }}>🔒 Private · No account needed · ~30 seconds</p>
+      </div>
+      {showSettings && <SettingsModal apiKey={apiKey} onSave={k=>setApiKey(k||'demo')} onClose={()=>setShowSettings(false)} />}
+    </div>
+  );
+
+  /* ── Screen: Form ── */
+  if (step === 'form') return (
+    <div style={{ minHeight:'100vh', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:24, position:'relative' }}>
+      <div className="noise-bg" />
+      <div className="orb" style={{ width:400, height:400, top:-100, right:-100, background:'rgba(108,99,255,.10)' }} />
+      <div className="fade-in" style={{ width:'100%', maxWidth:520, position:'relative', zIndex:1 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:32 }}>
+          <button className="btn-ghost" style={{ padding:'8px 12px', fontSize:18 }} onClick={()=>formStep===1?reset():setFormStep(f=>f-1)}>←</button>
+          <div style={{ flex:1 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+              <span style={{ fontSize:13, color:'var(--text-muted)' }}>Step {formStep} of 3</span>
+              <span style={{ fontSize:13, color:'var(--text-muted)' }}>{Math.round((formStep/3)*100)}%</span>
+            </div>
+            <div className="progress-bar"><div className="progress-fill" style={{ width:`${(formStep/3)*100}%` }}/></div>
+          </div>
+        </div>
+
+        {formStep===1 && (
+          <div className="card fade-in" style={{ padding:32 }}>
+            <div style={{ fontSize:40, marginBottom:12, textAlign:'center' }}>💭</div>
+            <h2 style={{ fontSize:22, fontWeight:800, marginBottom:8, textAlign:'center' }}>How are you feeling right now?</h2>
+            <p style={{ color:'var(--text-muted)', fontSize:14, textAlign:'center', marginBottom:24 }}>Write anything — a word, a sentence, or just a vibe. The AI will understand.</p>
+            <textarea className="form-input" rows={4} placeholder="e.g. I'm feeling a bit low today, miss my friends and just want to relax..." value={formData.text} onChange={e=>setFormData(fd=>({...fd,text:e.target.value}))} />
+            <div style={{ marginTop:20 }}>
+              <p style={{ fontSize:12, color:'var(--text-muted)', marginBottom:10 }}>Or pick a word that fits:</p>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                {MOOD_WORDS.map(w=><button key={w} className={`word-chip ${formData.words.includes(w)?'selected':''}`} onClick={()=>handleWordToggle(w)}>{w}</button>)}
+              </div>
+            </div>
+            <button className="btn-primary" style={{ width:'100%', marginTop:24 }} disabled={!canAdvance1} onClick={()=>setFormStep(2)}>Continue →</button>
+          </div>
+        )}
+
+        {formStep===2 && (
+          <div className="card fade-in" style={{ padding:32 }}>
+            <div style={{ fontSize:40, marginBottom:12, textAlign:'center' }}>⚡</div>
+            <h2 style={{ fontSize:22, fontWeight:800, marginBottom:8, textAlign:'center' }}>What's your energy level?</h2>
+            <p style={{ color:'var(--text-muted)', fontSize:14, textAlign:'center', marginBottom:32 }}>This helps the AI understand your vibe more accurately.</p>
+            <div style={{ padding:'0 8px' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:12, fontSize:13, color:'var(--text-muted)' }}>
+                <span>😴 Drained</span><span>😐 Neutral</span><span>⚡ Wired</span>
+              </div>
+              <input type="range" min={1} max={5} step={1} value={formData.energy} onChange={e=>setFormData(fd=>({...fd,energy:Number(e.target.value)}))} />
+              <div style={{ textAlign:'center', marginTop:16 }}>
+                <span style={{ fontSize:36 }}>{['','😴','😓','😐','😊','⚡'][formData.energy]}</span>
+                <div style={{ fontSize:14, color:'var(--text-muted)', marginTop:4 }}>{['','Very Low','Low','Moderate','High','Very High'][formData.energy]}</div>
+              </div>
+            </div>
+            <div style={{ display:'flex', gap:12, marginTop:32 }}>
+              <button className="btn-ghost" style={{ flex:1 }} onClick={()=>setFormStep(1)}>← Back</button>
+              <button className="btn-primary" style={{ flex:2 }} onClick={()=>setFormStep(3)}>Continue →</button>
+            </div>
+          </div>
+        )}
+
+        {formStep===3 && (
+          <div className="card fade-in" style={{ padding:32 }}>
+            <div style={{ fontSize:40, marginBottom:12, textAlign:'center' }}>🎯</div>
+            <h2 style={{ fontSize:22, fontWeight:800, marginBottom:8, textAlign:'center' }}>What do you need right now?</h2>
+            <p style={{ color:'var(--text-muted)', fontSize:14, textAlign:'center', marginBottom:24 }}>This fine-tunes the AI's emotion analysis.</p>
+            <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+              {INTENTS.map(intent=>(
+                <button key={intent.id} className={`option-btn ${formData.intent===intent.id?'selected':''}`} onClick={()=>setFormData(fd=>({...fd,intent:intent.id}))}>
+                  <div style={{ fontWeight:600, fontSize:15 }}>{intent.label}</div>
+                  <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>{intent.desc}</div>
+                </button>
+              ))}
+            </div>
+            <div style={{ display:'flex', gap:12, marginTop:24 }}>
+              <button className="btn-ghost" style={{ flex:1 }} onClick={()=>setFormStep(2)}>← Back</button>
+              <button className="btn-primary" style={{ flex:2 }} disabled={!canAnalyze} onClick={handleAnalyze}>✨ Analyse with AI</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  /* ── Screen: Analyzing ── */
+  if (step === 'analyzing') return (
+    <div style={{ minHeight:'100vh', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:24, position:'relative' }}>
+      <div className="noise-bg" />
+      <div style={{ textAlign:'center', position:'relative', zIndex:1 }}>
+        <div style={{ position:'relative', width:120, height:120, margin:'0 auto 32px' }}>
+          <div style={{ position:'absolute', inset:0, borderRadius:'50%', background:'linear-gradient(135deg,#6c63ff,#a855f7)', animation:'ripple 1.5s ease-out infinite' }} />
+          <div style={{ position:'absolute', inset:10, borderRadius:'50%', background:'var(--surface2)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:36 }}>🧠</div>
+        </div>
+        <h2 style={{ fontSize:24, fontWeight:800, marginBottom:8 }}>Reading your vibe</h2>
+        <p style={{ color:'var(--text-muted)', fontSize:15, marginBottom:6 }}>
+          {analyzeMsg}
+          <span className="dot" style={{ background:'#6c63ff' }}/><span className="dot" style={{ background:'#8b5cf6' }}/><span className="dot" style={{ background:'#a855f7' }}/>
+        </p>
+        <p style={{ fontSize:12, color:'var(--text-muted)', marginBottom:28 }}>Asking <span style={{ color:'#a78bfa' }}>Groq · {GROQ_MODEL}</span></p>
+        <div style={{ width:280, margin:'0 auto' }}>
+          <div className="progress-bar" style={{ height:6 }}><div className="progress-fill" style={{ width:`${analyzeProgress}%` }}/></div>
+          <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:8, textAlign:'right' }}>{Math.round(analyzeProgress)}%</div>
+        </div>
+      </div>
+    </div>
+  );
+
+  /* ── Screen: Results ── */
+  if (step === 'results' && ec && result) {
+    const data = CONTENT[result.emotion];
+    return (
+      <div style={{ minHeight:'100vh', position:'relative' }}>
+        <div className="noise-bg" />
+        <div className="orb" style={{ width:500, height:500, top:-80, left:-80, background:ec.orb1 }} />
+        <div className="orb" style={{ width:400, height:400, bottom:0, right:-80, background:ec.orb2 }} />
+        <div style={{ maxWidth:900, margin:'0 auto', padding:'32px 20px', position:'relative', zIndex:1 }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:40 }}>
+            <span style={{ fontSize:20, fontWeight:900, background:'linear-gradient(135deg,#6c63ff,#a855f7)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent' }}>MoodStream</span>
+            <div style={{ display:'flex', gap:10 }}>
+              <button className="btn-ghost" style={{ padding:'7px 12px', fontSize:13 }} onClick={()=>setShowSettings(true)}>⚙️</button>
+              <button className="btn-ghost" onClick={reset}>↩ New mood</button>
+            </div>
+          </div>
+
+          {usedFallback && apiError && (
+            <div className="error-banner fade-in" style={{ marginBottom:32 }}>
+              <span>⚠️</span>
+              <div><strong>Groq API issue:</strong> {apiError}<br/><span style={{ opacity:.8 }}>Using offline keyword detection. Results may be less precise.</span></div>
+            </div>
+          )}
+
+          <div className="fade-in" style={{ textAlign:'center', marginBottom:40 }}>
+            <div style={{ fontSize:80, marginBottom:12, animation:'float 3s ease-in-out infinite' }}>{ec.emoji}</div>
+            <div style={{ marginBottom:10, display:'flex', justifyContent:'center', gap:8, flexWrap:'wrap' }}>
+              <span style={{ padding:'6px 16px', borderRadius:999, background:ec.bg, color:ec.color, border:`1px solid ${ec.color}44`, fontWeight:700, fontSize:14 }}>✦ {ec.label}</span>
+              {result.secondary && EMOTION_CONFIG[result.secondary] && (
+                <span style={{ padding:'6px 16px', borderRadius:999, background:'rgba(255,255,255,.05)', color:'var(--text-muted)', border:'1px solid var(--border)', fontSize:13 }}>
+                  also {EMOTION_CONFIG[result.secondary].emoji} {EMOTION_CONFIG[result.secondary].label}
+                </span>
+              )}
+              {!usedFallback && <span className="llm-badge">✦ AI Detected</span>}
+            </div>
+            <h1 style={{ fontSize:'clamp(24px,5vw,36px)', fontWeight:900, margin:'14px 0 8px' }}>
+              You're feeling <span style={{ background:ec.gradient, WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent' }}>{ec.label}</span>
+            </h1>
+          </div>
+
+          {result.reason && (
+            <div className="card fade-in" style={{ padding:'20px 24px', marginBottom:32, display:'flex', gap:16, alignItems:'flex-start', borderColor:ec.color+'33' }}>
+              <div style={{ fontSize:28, marginTop:2 }}>🤖</div>
+              <div style={{ flex:1 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:ec.color }}>Why the AI thinks this</div>
+                  {!usedFallback && <span className="llm-badge" style={{ fontSize:10 }}>Groq · {GROQ_MODEL}</span>}
+                </div>
+                <p style={{ fontSize:14, color:'var(--text-muted)', lineHeight:1.6, marginBottom:14 }}>"{result.reason}"</p>
+                <ConfidenceBar value={result.confidence} color={ec.color} />
+              </div>
+            </div>
+          )}
+
+          <div style={{ display:'flex', gap:6, background:'var(--surface)', padding:6, borderRadius:14, marginBottom:36, width:'fit-content', margin:'0 auto 36px' }}>
+            {[{id:'movies',label:'🎬 Movies'},{id:'music',label:'🎵 Music'},{id:'youtube',label:'📺 YouTube'}].map(tab=>(
+              <button key={tab.id} className={`tab-btn ${activeTab===tab.id?'active':''}`} onClick={()=>setActiveTab(tab.id)}>{tab.label}</button>
+            ))}
+          </div>
+
+          <div className="fade-in" key={activeTab}>
+            {activeTab==='movies'  && <ContentSection title="Movies for you"        icon="🎬" items={data.movies}  type="movies"  />}
+            {activeTab==='music'   && <ContentSection title="Music for your mood"   icon="🎵" items={data.music}   type="music"   />}
+            {activeTab==='youtube' && <ContentSection title="Videos picked for you" icon="📺" items={data.youtube} type="youtube" />}
+          </div>
+
+          <div className="card" style={{ padding:24, marginTop:40, display:'flex', gap:20, alignItems:'center', flexWrap:'wrap' }}>
+            <div style={{ flex:1, minWidth:200 }}>
+              <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:4 }}>Your mood summary</div>
+              <div style={{ fontSize:14, fontWeight:600, marginBottom:10 }}>{formData.text.slice(0,90)}{formData.text.length>90?'…':''}</div>
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                <span style={{ fontSize:12, color:'var(--text-muted)', background:'var(--surface2)', padding:'3px 9px', borderRadius:6 }}>Energy: {['','Very Low','Low','Moderate','High','Very High'][formData.energy]}</span>
+                <span style={{ fontSize:12, color:'var(--text-muted)', background:'var(--surface2)', padding:'3px 9px', borderRadius:6 }}>Seeking: {INTENTS.find(i=>i.id===formData.intent)?.label}</span>
+              </div>
+            </div>
+            <button className="btn-ghost" onClick={reset}>Try a different mood →</button>
+          </div>
+
+          <p style={{ textAlign:'center', fontSize:12, color:'var(--text-muted)', marginTop:32, marginBottom:16 }}>
+            MoodStream · Emotion detection by Groq · Your moods are never stored
+          </p>
+        </div>
+        {showSettings && <SettingsModal apiKey={apiKey} onSave={k=>setApiKey(k||'demo')} onClose={()=>setShowSettings(false)} />}
+      </div>
+    );
+  }
+
+  return null;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
