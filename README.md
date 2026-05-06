@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🎭 MoodStream
+#  MoodStream
 
 ### *Watch How You Feel*
 
@@ -82,14 +82,14 @@ That's it. No installs, no build step, no dependencies.
 
 | Emotion | Content Style |
 |---------|--------------|
-| 😊 Happy | Comedies, upbeat pop, funny videos |
-| 😢 Melancholic | Drama, indie folk, emotional shorts |
-| 😰 Anxious | Calming films, ambient music, ASMR |
-| 🔥 Excited | Action, high-energy music, sports highlights |
-| 🌊 Calm | Gentle films, acoustic sets, slow TV |
-| 😤 Frustrated | Cathartic movies, rock/metal, satisfying videos |
-| 💖 Romantic | Romance films, love songs, sunset timelapses |
-| 😑 Bored | Mind-bending films, psychedelic music, science |
+|  Happy | Comedies, upbeat pop, funny videos |
+|  Melancholic | Drama, indie folk, emotional shorts |
+|  Anxious | Calming films, ambient music, ASMR |
+|  Excited | Action, high-energy music, sports highlights |
+|  Calm | Gentle films, acoustic sets, slow TV |
+|  Frustrated | Cathartic movies, rock/metal, satisfying videos |
+|  Romantic | Romance films, love songs, sunset timelapses |
+|  Bored | Mind-bending films, psychedelic music, science |
 
 ---
 
@@ -123,14 +123,14 @@ EmotionBasedStreamingPlatform/
 
 ## Features
 
-- 🧠 **LLM emotion detection** with confidence score and plain-English reasoning
-- 🎬 **Movies** with genre, year, and star ratings
-- 🎵 **Music** with artist and genre tags
-- 📺 **YouTube** with channel-specific recommendations
-- 💖 **Secondary emotion** detection when two feelings are present
-- ⚡ **Offline fallback** via keyword matching — works without an API key
-- 🌈 **Dynamic theming** — colours and gradients shift per emotion
-- 🔒 **Privacy first** — no backend, no login, no data stored
+-  **LLM emotion detection** with confidence score and plain-English reasoning
+-  **Movies** with genre, year, and star ratings
+-  **Music** with artist and genre tags
+-  **YouTube** with channel-specific recommendations
+-  **Secondary emotion** detection when two feelings are present
+-  **Offline fallback** via keyword matching — works without an API key
+-  **Dynamic theming** colours and gradients shift per emotion
+-  **Privacy first**  no backend, no login, no data stored
 
 ---
 
@@ -155,11 +155,3 @@ Pull requests are welcome. Fork the repo, make your changes, and open a PR.
 MIT License — use it, build on it, make it yours.
 
 ---
-
-<div align="center">
-
-Made with ❤️ by **Prasad** · Powered by [Groq](https://groq.com)
-
-*Your mood deserves better than an algorithm.*
-
-</div>
